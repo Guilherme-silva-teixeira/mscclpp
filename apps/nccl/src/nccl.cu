@@ -87,6 +87,7 @@ struct ChannelInfo {
 };
 
 struct ncclComm {
+  std::shared_ptr<MPIBootstrap> bootstrap;
   std::shared_ptr<mscclpp::Communicator> comm;
   std::vector<std::shared_ptr<mscclpp::Connection>> connections;
   std::vector<std::shared_ptr<mscclpp::SmDevice2DeviceSemaphore>> smSemaphores;
@@ -337,65 +338,9 @@ NCCL_API ncclResult_t ncclCommInitRank(ncclComm_t* comm, int nranks, ncclUniqueI
   if (comm == nullptr) return ncclInvalidArgument;
   if (nranks < 0 || rank < 0 || rank >= nranks) return ncclInvalidArgument;
   std::shared_ptr<MPIBootstrap> bootstrap = std::make_shared<MPIBootstrap>();
-  std::shared_ptr<mscclpp::Communicator> mscclppComm = std::make_shared<mscclpp::Communicator>(bootstrap);
-  std::vector<mscclpp::NonblockingFuture<std::shared_ptr<mscclpp::Connection>>> connectionFutures;
-
-  for (int i = 0; i < mscclppComm->bootstrap()->getNranks(); i++) {
-    if (i == rank) continue;
-    mscclpp::Transport transport = getTransport(rank, i);
-    connectionFutures.push_back(mscclppComm->connectOnSetup(i, 0, transport));
-  }
-  mscclppComm->setup();
-
-  std::vector<std::shared_ptr<mscclpp::Connection>> connections;
-  std::transform(connectionFutures.begin(), connectionFutures.end(), std::back_inserter(connections),
-                 [](const auto& future) { return future.get(); });
-
-  std::vector<std::shared_ptr<mscclpp::SmDevice2DeviceSemaphore>> smSemaphores;
-  for (size_t idx = 0; idx < NUM_CHANNELS_PER_CONNECTION; ++idx) {
-    for (size_t cid = 0; cid < connections.size(); ++cid) {
-      if (connections[cid]->transport() == mscclpp::Transport::CudaIpc) {
-        smSemaphores.emplace_back(
-            std::make_shared<mscclpp::SmDevice2DeviceSemaphore>(*(mscclppComm), connections[cid]));
-      }
-    }
-  }
-  mscclppComm->setup();
 
   ncclComm* commPtr = new ncclComm();
-  commPtr->comm = mscclppComm;
-  commPtr->connections = std::move(connections);
-  commPtr->smSemaphores = std::move(smSemaphores);
-  commPtr->buffFlag = 0;
-  commPtr->numScratchBuff = 2;
-  commPtr->scratchBuff = mscclpp::allocExtSharedCuda<char>(SCRATCH_SIZE);
-  commPtr->remoteScratchRegMemories =
-      setupRemoteMemories(commPtr->comm, rank, commPtr->scratchBuff.get(), SCRATCH_SIZE, mscclpp::Transport::CudaIpc);
-  commPtr->executor = std::make_shared<mscclpp::Executor>(mscclppComm);
-
-  if (getenv("ALLREDUCEPKT_IP_JSON_FILE"))
-    commPtr->allReducePacketIPPlan = std::make_shared<mscclpp::ExecutionPlan>(
-        mscclpp::ExecutionPlan("allreduce_packet", getenv("ALLREDUCEPKT_IP_JSON_FILE")));
-  if (getenv("ALLREDUCEPKT_OP_JSON_FILE"))
-    commPtr->allReducePacketOPPlan = std::make_shared<mscclpp::ExecutionPlan>(
-        mscclpp::ExecutionPlan("allreduce_packet", getenv("ALLREDUCEPKT_OP_JSON_FILE")));
-  if (getenv("ALLREDUCE_IP_JSON_FILE"))
-    commPtr->allReduceIPPlan =
-        std::make_shared<mscclpp::ExecutionPlan>(mscclpp::ExecutionPlan("allreduce", getenv("ALLREDUCE_IP_JSON_FILE")));
-  if (getenv("ALLREDUCE_OP_JSON_FILE"))
-    commPtr->allReduceOPPlan =
-        std::make_shared<mscclpp::ExecutionPlan>(mscclpp::ExecutionPlan("allreduce", getenv("ALLREDUCE_OP_JSON_FILE")));
-  if (getenv("ALLREDUCE_SMALL_MSG_BOUNDARY"))
-    commPtr->smallMessageSizeBoundary = parseSize(getenv("ALLREDUCE_SMALL_MSG_BOUNDARY"));
-  else
-    commPtr->smallMessageSizeBoundary = 16 * (1 << 10);
-  if (getenv("ALLREDUCE_LARGE_MSG_BOUNDARY"))
-    commPtr->largeMessageSizeBoundary = parseSize(getenv("ALLREDUCE_LARGE_MSG_BOUNDARY"));
-  else
-    commPtr->largeMessageSizeBoundary = 1 << 20;
-
-  if (commPtr->smallMessageSizeBoundary > commPtr->largeMessageSizeBoundary) return ncclInvalidArgument;
-
+  commPtr->bootstrap = bootstrap;
   *comm = commPtr;
   return ncclSuccess;
 }
@@ -406,7 +351,7 @@ NCCL_API ncclResult_t ncclCommInitAll(ncclComm_t*, int, const int*) {
 }
 
 NCCL_API ncclResult_t ncclCommFinalize(ncclComm_t comm) {
-  comm->comm->bootstrap()->barrier();
+  comm->bootstrap->barrier();
   return ncclSuccess;
 }
 
@@ -462,19 +407,19 @@ NCCL_API ncclResult_t ncclCommGetAsyncError(ncclComm_t, ncclResult_t* asyncError
 
 NCCL_API ncclResult_t ncclCommCount(const ncclComm_t comm, int* count) {
   if (comm == nullptr || count == nullptr) return ncclInvalidArgument;
-  *count = comm->comm->bootstrap()->getNranks();
+  *count = comm->bootstrap->getNranks();
   return ncclSuccess;
 }
 
 NCCL_API ncclResult_t ncclCommCuDevice(const ncclComm_t comm, int* device) {
   if (comm == nullptr || device == nullptr) return ncclInvalidArgument;
-  *device = comm->comm->bootstrap()->getRank();
+  *device = comm->bootstrap->getRank();
   return ncclSuccess;
 }
 
 NCCL_API ncclResult_t ncclCommUserRank(const ncclComm_t comm, int* rank) {
   if (comm == nullptr || rank == nullptr) return ncclInvalidArgument;
-  *rank = comm->comm->bootstrap()->getRank();
+  *rank = comm->bootstrap->getRank();
   return ncclSuccess;
 }
 
@@ -506,6 +451,7 @@ NCCL_API ncclResult_t ncclBroadcast(const void*, void*, size_t, ncclDataType_t, 
 
 NCCL_API ncclResult_t ncclAllReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                     ncclRedOp_t reductionOperation, ncclComm_t comm, cudaStream_t stream) {
+  return ncclSuccess;
   // Checking if the parameters are valids
   if (sendbuff == nullptr || recvbuff == nullptr || count == 0 || ncclTypeSize(datatype) == 0 || comm == nullptr)
     return ncclInvalidArgument;
@@ -561,6 +507,7 @@ NCCL_API ncclResult_t ncclReduceScatter(const void*, void*, size_t, ncclDataType
 
 NCCL_API ncclResult_t ncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
                                     ncclComm_t comm, cudaStream_t stream) {
+  return ncclSuccess;
   size_t bytes = sendcount * ncclTypeSize(datatype);
   if (sendbuff == nullptr || recvbuff == nullptr || bytes == 0 || comm == nullptr) return ncclInvalidArgument;
 
