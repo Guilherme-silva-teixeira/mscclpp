@@ -18,8 +18,8 @@ __global__ void __launch_bounds__(1024, 1)
     broadcast6(void* sendbuff, mscclpp::DeviceHandle<mscclpp::SmChannel>* smChannels, size_t channelOutOffset,
                size_t rank, size_t root, [[maybe_unused]] size_t worldSize, size_t nRanksPerNode, size_t nelemsPerGPU) {
   const size_t tid = threadIdx.x + blockIdx.x * blockDim.x;
-  const size_t lid = tid % WARP_SIZE;
-  const size_t wid = tid / WARP_SIZE;
+  const size_t lid = tid % WARP_SIZE; //threadid within warp
+  const size_t wid = tid / WARP_SIZE; //warp id
 
   const size_t nThread = blockDim.x * gridDim.x;
   const size_t nWarp = nThread / WARP_SIZE;
@@ -50,14 +50,16 @@ __global__ void __launch_bounds__(1024, 1)
     // First loop unrolling
     const size_t peerIdx = wid % nPeer;
     const size_t offset = (wid / nPeer) * unitBytesPerWarp;
+    /*if(lid==0) { //first thread of each warp
+       printf("wid=%d, peerIdx=%ld, offset=%ld, unitBytesPerWarp=%ld, unitBytesPerThread=%ld\n", wid, peerIdx, offset, unitBytesPerWarp, unitBytesPerThread);
+    }*/
     if constexpr (IsOutOfPlace) {
       char* dst = reinterpret_cast<char*>(smChans[peerIdx].dst_);
       char* src = reinterpret_cast<char*>(smChans[peerIdx].src_);
       char* buff = reinterpret_cast<char*>(sendbuff);
-      //const size_t offsetWithinRank = (wid / nPeer) * unitBytesPerWarp;
-      smChans[peerIdx].copy<16, false>(src + offset + channelOutOffset, buff + offset, unitBytesPerWarp, lid,
+      smChans[peerIdx].copy<16, false>(src + offset, buff + offset, unitBytesPerWarp, lid,
                                        WARP_SIZE);
-      smChans[peerIdx].copy<16, false>(dst + offset + channelOutOffset, buff + offset, unitBytesPerWarp, lid,
+      smChans[peerIdx].copy<16, false>(dst + offset, buff + offset, unitBytesPerWarp, lid,
                                        WARP_SIZE);
     } else {
       smChans[peerIdx].put<16, false>(offset + channelOutOffset, unitBytesPerWarp, lid, WARP_SIZE);
@@ -74,9 +76,9 @@ __global__ void __launch_bounds__(1024, 1)
       char* src = reinterpret_cast<char*>(smChans[peerIdx].src_);
       char* buff = reinterpret_cast<char*>(sendbuff);
       //const size_t offsetWithinRank = (gWid / nPeer) * unitBytesPerWarp;
-      smChans[peerIdx].copy<16, false>(src + offset + channelOutOffset, buff + offset, unitBytesPerWarp, lid,
+      smChans[peerIdx].copy<16, false>(src + offset, buff + offset, unitBytesPerWarp, lid,
                                        WARP_SIZE);
-      smChans[peerIdx].copy<16, false>(dst + offset + channelOutOffset, buff + offset, unitBytesPerWarp, lid,
+      smChans[peerIdx].copy<16, false>(dst + offset, buff + offset, unitBytesPerWarp, lid,
                                        WARP_SIZE);
     } else {
       smChans[peerIdx].put<16, false>(offset + channelOutOffset, unitBytesPerWarp, lid, WARP_SIZE);
@@ -96,9 +98,9 @@ __global__ void __launch_bounds__(1024, 1)
         char* dst = reinterpret_cast<char*>(smChans[peerIdx].dst_);
         char* src = reinterpret_cast<char*>(smChans[peerIdx].src_);
         char* buff = reinterpret_cast<char*>(sendbuff);
-        smChans[peerIdx].copy<16, true>(src + offset + channelOutOffset, buff + offset, remainBytes, lid,
+        smChans[peerIdx].copy<16, true>(src + offset, buff + offset, remainBytes, lid,
                                         WARP_SIZE);
-        smChans[peerIdx].copy<16, true>(dst + offset + channelOutOffset, buff + offset, remainBytes, lid,
+        smChans[peerIdx].copy<16, true>(dst + offset, buff + offset, remainBytes, lid,
                                         WARP_SIZE);
       } else {
         smChans[peerIdx].put<16, true>(offset + channelOutOffset, remainBytes, lid, WARP_SIZE);
@@ -128,11 +130,7 @@ cudaError_t broadcast(T* buff, [[maybe_unused]] T* scratch, [[maybe_unused]] T* 
   } else if (nelems >= 2097152) {
     nBlocks = 35;
   }
-  /*allgather6<IsOutOfPlace><<<nBlocks, 1024, 0, stream>>>((void*)buff, smChannels, channelOutOffset, rank, worldSize,
-                                                         nRanksPerNode, nelems * sizeof(T) / sizeof(int));
-                                                         */
   broadcast6<IsOutOfPlace><<<nBlocks, 1024, 0, stream>>>((void*)buff, smChannels, channelOutOffset, rank, root,  worldSize,nRanksPerNode, nelems * sizeof(T) / sizeof(int));
-  //printf("call_broadcast\n");
   return cudaGetLastError();
 }
 
