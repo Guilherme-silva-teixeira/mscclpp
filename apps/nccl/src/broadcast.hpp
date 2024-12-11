@@ -175,9 +175,9 @@ __global__ void __launch_bounds__(1024, 1)
           //smChans[peerIdx].copy<16, false>(dst + offset + channelOutOffset, buff + offset, unitBytesPerWarp, lid,
           //                                 WARP_SIZE);
       } else {
-        smChans[peerIdx].put(offset + channelOutOffset, unitBytes, threadIdx.x, blockDim.x);
+        //smChans[peerIdx].put(offset + channelOutOffset, unitBytes, threadIdx.x, blockDim.x);
 	__syncthreads();
-	if (threadIdx.x < nPeer)
+	if (threadIdx.x < nPeer && blockIdx.x == 0)
 	  smChans[threadIdx.x].signal();
       }
     }
@@ -186,9 +186,15 @@ __global__ void __launch_bounds__(1024, 1)
     if (nLoop > 0) {
       if constexpr (IsOutOfPlace) {
       } else {
-        if(threadIdx.x == peerRootIdx)
-           smChans[threadIdx.x].wait();
-	__syncthreads();
+	if(blockIdx.x == (rank-1)) {
+	  const size_t offset = rank * bytesPerGPU;
+	  smChans[peerRootIdx].get(offset + channelOutOffset, unitBytes, threadIdx.x, blockDim.x);
+	  __syncthreads();
+          if(threadIdx.x > 0 && threadIdx.x < rank && threadIdx.x < nPeer) 
+            smChans[threadIdx.x].signal();
+	  else if(threadIdx.x > 0 && threadIdx.x >= rank && threadIdx.x < nPeer) 
+	    (smChans + nPeer)[threadIdx.x].signal();
+	}
       }
     }
   }
@@ -199,6 +205,9 @@ __global__ void __launch_bounds__(1024, 1)
     if (nLoop > 0) {      
       if constexpr (IsOutOfPlace) {
       } else {
+        if (threadIdx.x == peerIdx)
+          smChans[peerIdx].wait();
+        __syncthreads();
         const int peerRank = (peerIdx < rank) ? peerIdx : peerIdx + 1;
         const size_t offset = peerRank * bytesPerGPU;
         smChans[peerIdx].get(offset + channelOutOffset, unitBytes, threadIdx.x, blockDim.x);
