@@ -176,23 +176,24 @@ __global__ void __launch_bounds__(1024, 1)
           //                                 WARP_SIZE);
       } else {
         smChans[peerIdx].put(offset + channelOutOffset, unitBytes, threadIdx.x, blockDim.x);
-	//__syncthreads();
-	//if (threadIdx.x < nPeer)
-	//  smChans[threadIdx.x].signal();
+	__syncthreads();
+	if (threadIdx.x < nPeer)
+	  smChans[threadIdx.x].signal();
       }
     }
   } 
-  //else {
-  //  if (nLoop > 0) {
-  //    if constexpr (IsOutOfPlace) {
-  //    } else {
-  //      if(threadIdx.x == peerRootIdx)
-  //         smChans[threadIdx.x].wait();
-  //      }
-  //  }
-  //}
+  else {
+    if (nLoop > 0) {
+      if constexpr (IsOutOfPlace) {
+      } else {
+        if(threadIdx.x == peerRootIdx)
+           smChans[threadIdx.x].wait();
+	__syncthreads();
+      }
+    }
+  }
 
-  deviceSyncer.sync(gridDim.x);
+  //deviceSyncer.sync(gridDim.x);
 
   if(rank != root) {
     if (nLoop > 0) {      
