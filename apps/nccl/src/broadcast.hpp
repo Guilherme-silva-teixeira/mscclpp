@@ -128,6 +128,11 @@ __global__ void __launch_bounds__(1024, 1)
   const size_t nWarp = nThread / WARP_SIZE;
   const size_t nPeer = nRanksPerNode - 1;
   const size_t chanOffset = nPeer * blockIdx.x;
+
+  //__shared__ mscclpp::DeviceHandle<mscclpp::SmChannel> smChans[NRANKS_PER_NODE - 1];
+  //if(threadIdx.x < nPeer)
+  //        smChans[threadIdx.x] = smChannels[chanOffset+threadIdx.x];
+  //__syncthreads();
   auto smChans = smChannels + chanOffset;
 
   const size_t peerIdx = blockIdx.x;
@@ -170,9 +175,9 @@ __global__ void __launch_bounds__(1024, 1)
           //smChans[peerIdx].copy<16, false>(dst + offset + channelOutOffset, buff + offset, unitBytesPerWarp, lid,
           //                                 WARP_SIZE);
       } else {
-        smChans[peerIdx].put<16, false>(offset + channelOutOffset, unitBytes, threadIdx.x, blockDim.x);
+        smChans[peerIdx].put(offset + channelOutOffset, unitBytes, threadIdx.x, blockDim.x);
 	__syncthreads();
-	if (threadIdx.x < nPeer) 
+	if (threadIdx.x < nPeer)
 	  smChans[threadIdx.x].signal();
       }
     }
@@ -182,10 +187,19 @@ __global__ void __launch_bounds__(1024, 1)
       } else {
         if(threadIdx.x == peerRootIdx)
            smChans[threadIdx.x].wait();
-        __syncthreads();
+        }
+    }
+  }
+
+  deviceSyncer.sync(gridDim.x);
+
+  if(rank != root) {
+    if (nLoop > 0) {      
+      if constexpr (IsOutOfPlace) {
+      } else {
         const int peerRank = (peerIdx < rank) ? peerIdx : peerIdx + 1;
         const size_t offset = peerRank * bytesPerGPU;
-        smChans[peerIdx].get<16, false>(offset + channelOutOffset, unitBytes, threadIdx.x, blockDim.x);
+        smChans[peerIdx].get(offset + channelOutOffset, unitBytes, threadIdx.x, blockDim.x);
       }
     }
   }
