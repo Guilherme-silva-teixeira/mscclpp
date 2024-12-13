@@ -579,20 +579,20 @@ NCCL_API ncclResult_t ncclBroadcast(const void* sendbuff, void* recvbuff, size_t
 
   switch (datatype) {
     case ncclFloat16:
-      comm->executor->execute(rank, (half*)sendbuff, (half*)recvbuff, bytes, bytes * nRank, mscclpp::DataType::FLOAT16,
+      comm->executor->execute(rank, (half*)sendbuff, (half*)recvbuff, bytes, bytes, mscclpp::DataType::FLOAT16,
                               *plan, stream);
       break;
     case ncclFloat32:
-      comm->executor->execute(rank, (float*)sendbuff, (float*)recvbuff, bytes, bytes * nRank,
+      comm->executor->execute(rank, (float*)sendbuff, (float*)recvbuff, bytes, bytes,
                               mscclpp::DataType::FLOAT32, *plan, stream);
       break;
     case ncclBfloat16:
-      comm->executor->execute(rank, (__bfloat16*)sendbuff, (__bfloat16*)recvbuff, bytes, bytes * nRank,
+      comm->executor->execute(rank, (__bfloat16*)sendbuff, (__bfloat16*)recvbuff, bytes, bytes,
                               mscclpp::DataType::BFLOAT16, *plan, stream);
       break;
     case ncclInt32:
     case ncclUint32:
-      comm->executor->execute(rank, (int*)sendbuff, (int*)recvbuff, bytes, bytes * nRank, mscclpp::DataType::UINT32,
+      comm->executor->execute(rank, (int*)sendbuff, (int*)recvbuff, bytes, bytes, mscclpp::DataType::UINT32,
                               *plan, stream);
       break;
     default:
