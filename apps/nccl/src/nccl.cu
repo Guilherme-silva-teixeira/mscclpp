@@ -564,7 +564,6 @@ NCCL_API ncclResult_t ncclBroadcast(const void* sendbuff, void* recvbuff, size_t
 
   std::vector<executionPlanInstance>& plans = comm->executionPlans["broadcast"];
   std::shared_ptr<mscclpp::ExecutionPlan> plan;
-  if(rank == root) {
   void* basePtr = (char*)sendbuff;
   bool inPlace = basePtr == recvbuff;
   const size_t totalBytes = bytes;
@@ -574,7 +573,7 @@ NCCL_API ncclResult_t ncclBroadcast(const void* sendbuff, void* recvbuff, size_t
       break;
     }
   }
-  }
+
   if (plan == nullptr) return ncclBroadcastFallback(sendbuff, recvbuff, count, datatype, root, comm, stream);
 
   switch (datatype) {
@@ -599,7 +598,7 @@ NCCL_API ncclResult_t ncclBroadcast(const void* sendbuff, void* recvbuff, size_t
       return ncclInvalidArgument;
   }
 
-  return ncclInternalError;
+  return ncclSuccess;
 }
 
 NCCL_API ncclResult_t ncclAllReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
