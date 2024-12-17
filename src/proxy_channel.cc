@@ -24,6 +24,7 @@ MSCCLPP_API_CPP ProxyService::ProxyService(size_t fifoSize)
   int cudaDevice;
   MSCCLPP_CUDATHROW(cudaGetDevice(&cudaDevice));
   deviceNumaNode = getDeviceNumaNode(cudaDevice);
+  inflightRequests = 0;
 }
 
 MSCCLPP_API_CPP SemaphoreId ProxyService::buildAndAddSemaphore(Communicator& communicator,
@@ -70,6 +71,12 @@ ProxyHandlerResult ProxyService::handleTrigger(ProxyTrigger triggerRaw) {
   std::shared_ptr<Host2DeviceSemaphore> semaphore = semaphores_[trigger->fields.chanId];
 
   auto result = ProxyHandlerResult::Continue;
+  inflightRequests++;
+  if(!(trigger->fields.type & TriggerSync) && inflightRequests > 500){
+    semaphore->connection()->flush();
+    result = ProxyHandlerResult::FlushFifoTailAndContinue;
+    inflightRequests = 0;
+  }
 
   if (trigger->fields.type & TriggerData) {
     RegisteredMemory& dst = memories_[trigger->fields.dstMemoryId];
@@ -85,6 +92,7 @@ ProxyHandlerResult ProxyService::handleTrigger(ProxyTrigger triggerRaw) {
   if (trigger->fields.type & TriggerSync) {
     semaphore->connection()->flush();
     result = ProxyHandlerResult::FlushFifoTailAndContinue;
+    inflightRequests = 0;
   }
 
   return result;
