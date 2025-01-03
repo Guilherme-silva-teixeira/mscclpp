@@ -24,7 +24,6 @@ MSCCLPP_API_CPP ProxyService::ProxyService(size_t fifoSize)
   int cudaDevice;
   MSCCLPP_CUDATHROW(cudaGetDevice(&cudaDevice));
   deviceNumaNode = getDeviceNumaNode(cudaDevice);
-  inflightRequests = 0;
 }
 
 MSCCLPP_API_CPP SemaphoreId ProxyService::buildAndAddSemaphore(Communicator& communicator,
