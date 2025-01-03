@@ -71,28 +71,25 @@ ProxyHandlerResult ProxyService::handleTrigger(ProxyTrigger triggerRaw) {
   std::shared_ptr<Host2DeviceSemaphore> semaphore = semaphores_[trigger->fields.chanId];
 
   auto result = ProxyHandlerResult::Continue;
-  inflightRequests++;
-  if(!(trigger->fields.type & TriggerSync) && inflightRequests > 500){
-    semaphore->connection()->flush();
-    result = ProxyHandlerResult::FlushFifoTailAndContinue;
-    inflightRequests = 0;
-  }
 
   if (trigger->fields.type & TriggerData) {
     RegisteredMemory& dst = memories_[trigger->fields.dstMemoryId];
     RegisteredMemory& src = memories_[trigger->fields.srcMemoryId];
     semaphore->connection()->write(dst, trigger->fields.dstOffset, src, trigger->fields.srcOffset,
                                    trigger->fields.size);
+    inflightRequests[semaphore->connection()]++;
   }
 
   if (trigger->fields.type & TriggerFlag) {
     semaphore->signal();
+    inflightRequests[semaphore->connection()]++;
   }
 
-  if (trigger->fields.type & TriggerSync) {
+  if (trigger->fields.type & TriggerSync ||
+      inflightRequests[semaphore->connection()] > semaphore->connection()->getMaxInflightRequest()) {
     semaphore->connection()->flush();
     result = ProxyHandlerResult::FlushFifoTailAndContinue;
-    inflightRequests = 0;
+    inflightRequests[semaphore->connection()] = 0;
   }
 
   return result;
